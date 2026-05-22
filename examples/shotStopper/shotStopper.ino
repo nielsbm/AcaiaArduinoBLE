@@ -437,7 +437,16 @@ void setup() {
   // initialize the BLE hardware
   initializeBLE();
 
-  esp_task_wdt_init(WDT_TIMEOUT_S, true);
+  // Arduino-ESP32 core 3.x (ESP-IDF 5.x) initializes the TWDT at boot, so
+  // esp_task_wdt_init() returns ESP_ERR_INVALID_STATE here — reconfigure instead.
+  esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms     = WDT_TIMEOUT_S * 1000,
+    .idle_core_mask = 0,
+    .trigger_panic  = true,
+  };
+  if (esp_task_wdt_init(&wdtConfig) == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_reconfigure(&wdtConfig);
+  }
   esp_task_wdt_add(NULL);
 }
 
