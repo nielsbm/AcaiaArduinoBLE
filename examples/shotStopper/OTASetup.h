@@ -62,7 +62,7 @@ void setupOTA() {
     });
 
     server.on("/status", HTTP_GET, []() {
-        server.send(200, "application/json", "{\"status\": \"running\", \"ip\": \"" + WiFi.localIP().toString() + ", \"freeHeap\": " + ESP.getFreeHeap() + "}");
+        server.send(200, "application/json", "{\"status\": \"running\", \"ip\": \"" + WiFi.localIP().toString() + "\", \"freeHeap\": " + ESP.getFreeHeap() + "}");
     });
 
     // Define the OTA update route
