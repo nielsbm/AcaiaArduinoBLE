@@ -142,17 +142,19 @@ bool AcaiaArduinoBLE::init(String mac){
                 Serial.println("subscribed!");
             }
         
-            if(_write.writeValue(IDENTIFY, 20)){
-                Serial.println("identify write successful");
-            }else{
-                Serial.println("identify write failed");
-                return false; 
-            }
-            if(_write.writeValue(NOTIFICATION_REQUEST,14)){
-                Serial.println("notification request write successful");
-            }else{
-                Serial.println("notification request write failed");
-                return false; 
+            if(_type != GENERIC){
+                if(_write.writeValue(IDENTIFY, 20)){
+                    Serial.println("identify write successful");
+                }else{
+                    Serial.println("identify write failed");
+                    return false;
+                }
+                if(_write.writeValue(NOTIFICATION_REQUEST,14)){
+                    Serial.println("notification request write successful");
+                }else{
+                    Serial.println("notification request write failed");
+                    return false;
+                }
             }
             _connected = true;
             _packetPeriod = 0;
