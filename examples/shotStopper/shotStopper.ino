@@ -29,7 +29,7 @@
 #define MAX_OFFSET 5                // In case an error in brewing occured
 #define BUTTON_READ_PERIOD_MS 5
 
-#define EEPROM_SIZE 75
+#define EEPROM_SIZE 78
 #define SIGNATURE_ADDR 0 // Use the first byte to store a magic number/signature to know if the memory has been initialized
 #define ENABLED_ADDR 1
 #define WEIGHT_ADDR 2 // Use the second byte of EEPROM to store the goal weight
@@ -42,15 +42,19 @@
 #define DRIP_DELAY_S_ADDR 9
 #define WIFI_SSID_ADDR 10
 #define WIFI_PASS_ADDR 42
+#define TARE_START_TIMER_ADDR 74
+#define BEEP_ADDR 75
+#define BEEP_LEVEL_ADDR 76
 #define SIGNATURE_VALUE 0xAA
 
 #define DEBUG false
 
-#define N 10                        // Number of datapoints used to calculate trend line
+#define N 10                   // Number of datapoints used to calculate trend line
 
 
-// Reduce CPU clock to lower V3 power draw (~130mA→100mA)
-#define LOW_VOLTAGE false
+#define LOW_VOLTAGE false      // Reduce CPU clock to lower V3 power draw (~130mA→100mA)
+
+#define TIMER_ONLY false      // disables brew by weight functionality, and only automates the timer/tare
 
 // Board Hardware 
 #ifdef ARDUINO_ESP32S3_DEV
@@ -99,7 +103,11 @@ bool enabled = true;                // The shotStopper status, if disabled it wo
 String wifiSsid = "";
 String wifiPass = "";
 
-typedef enum {BUTTON, WEIGHT, TIME, UNDEF} ENDTYPE;
+bool tareStartTimer = false;        // Scale is able to tare and reset + start timer in one command (Bookoo support only)
+bool beep = false;                  // Scale is able to beep without relying on a tare command (Bookoo support only)
+uint8_t beepLevel = 0;              // Scale beep level between 0 (silent) and 5 (loudest) (Bookoo support only)
+
+typedef enum {BUTTON, WEIGHT, TIME, DISCONNECT, UNDEF} ENDTYPE;
 
 // RGB Colors {Red,Green,Blue}
 int RED[3] = {255, 0, 0};
@@ -158,7 +166,9 @@ BLEByteCharacteristic otaModeRequestedCharacteristic("0xFF21",  BLEWrite | BLERe
 BLECharacteristic wifiSsidCharacteristic("0xFF22",  BLEWrite | BLERead, 32);
 BLECharacteristic wifiPassCharacteristic("0xFF23",  BLEWrite, 32);
 BLECharacteristic wifiIpCharacteristic("0xFF24",  BLERead | BLENotify, 16);
-
+BLEByteCharacteristic tareStartTimerCharacteristic("0xFF25",  BLEWrite | BLERead);
+BLEByteCharacteristic beepCharacteristic("0xFF26",  BLEWrite | BLERead);
+BLEByteCharacteristic beepLevelCharacteristic("0xFF27",  BLEWrite | BLERead);
 
 enum ScaleStatus {
   STATUS_DISCONNECTED = 0,
@@ -238,6 +248,9 @@ void loadOrInitEEPROM() {
     EEPROM.write(DRIP_DELAY_S_ADDR, dripDelayS);
     writeStringToEEPROM(WIFI_SSID_ADDR, wifiSsid);
     writeStringToEEPROM(WIFI_PASS_ADDR, wifiPass);
+    EEPROM.write(TARE_START_TIMER_ADDR, tareStartTimer);
+    EEPROM.write(BEEP_ADDR, beep);
+    EEPROM.write(BEEP_LEVEL_ADDR, beepLevel);
     EEPROM.commit();
     Serial.println("EEPROM initialized with defaults");
   } else {
@@ -257,6 +270,9 @@ void loadOrInitEEPROM() {
     dripDelayS = EEPROM.read(DRIP_DELAY_S_ADDR);
     wifiSsid = readStringFromEEPROM(WIFI_SSID_ADDR, 32);
     wifiPass = readStringFromEEPROM(WIFI_PASS_ADDR, 32);
+    tareStartTimer = EEPROM.read(TARE_START_TIMER_ADDR);
+    beep = EEPROM.read(BEEP_ADDR);
+    beepLevel = EEPROM.read(BEEP_LEVEL_ADDR);
   }
 }
 
@@ -280,6 +296,9 @@ void initializeBLE() {
   shotStopperService.addCharacteristic(wifiSsidCharacteristic);
   shotStopperService.addCharacteristic(wifiPassCharacteristic);
   shotStopperService.addCharacteristic(wifiIpCharacteristic);
+  shotStopperService.addCharacteristic(tareStartTimerCharacteristic);
+  shotStopperService.addCharacteristic(beepCharacteristic);
+  shotStopperService.addCharacteristic(beepLevelCharacteristic);
   BLE.addService(shotStopperService);
   enabledCharacteristic.writeValue(enabled ? 1 : 0);
   weightCharacteristic.writeValue(goalWeight);
@@ -295,6 +314,9 @@ void initializeBLE() {
   otaModeRequestedCharacteristic.writeValue(otaModeRequested ? 1 : 0);
   writeStringToCharacteristic(wifiSsidCharacteristic, wifiSsid);
   writeStringToCharacteristic(wifiIpCharacteristic, lastWifiIp);
+  tareStartTimerCharacteristic.writeValue(tareStartTimer ? 1 : 0);
+  beepCharacteristic.writeValue(beep ? 1 : 0);
+  beepLevelCharacteristic.writeValue(beepLevel);
   BLE.advertise();
   Serial.println("Bluetooth® device active, waiting for connections...");
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
@@ -372,6 +394,21 @@ void pollAndReadBLE() {
     writeStringToEEPROM(WIFI_PASS_ADDR, wifiPass);
     updated = true;
   }
+  if (tareStartTimerCharacteristic.written()) {
+    tareStartTimer = tareStartTimerCharacteristic.value() != 0;
+    EEPROM.write(TARE_START_TIMER_ADDR, tareStartTimer ? 1 : 0);
+    updated = true;
+  }
+  if (beepCharacteristic.written()) {
+    beep = beepCharacteristic.value() != 0;
+    EEPROM.write(BEEP_ADDR, beep ? 1 : 0);
+    updated = true;
+  }
+  if (beepLevelCharacteristic.written()) {
+    beepLevel = beepLevelCharacteristic.value();
+    EEPROM.write(BEEP_LEVEL_ADDR, beepLevel);
+    updated = true;
+  }
   if (updated) {
     EEPROM.commit();
   }
@@ -431,6 +468,8 @@ void loop() {
     scale.init(); 
     currentWeight = 0;
     if(shot.brewing){
+      shot.brewing = false;
+      shot.end = ENDTYPE::DISCONNECT;
       setBrewingState(false);
     }
     if(scale.isConnected()){
@@ -459,7 +498,7 @@ void loop() {
     }
 
     // update shot trajectory
-    if(shot.brewing){
+    if(shot.brewing && !TIMER_ONLY){
       shot.time_s[shot.datapoints] = seconds_f()-shot.start_timestamp_s;
       shot.weight[shot.datapoints] = currentWeight;
       shot.shotTimer = shot.time_s[shot.datapoints];
@@ -498,23 +537,29 @@ void loop() {
       //Serial.print(buttonArr[i]);
     }
     //Serial.println();
-    if(reedSwitch && !shot.brewing && seconds_f() < (shot.start_timestamp_s + shot.end_s + 0.5)){
+    //The reed switch measurements require a small amount of delay for accuracy.
+    //  if the shot just stopped, assume that the reed switch should read "open" for the first 0.5s
+    if(reedSwitch && !shot.brewing && seconds_f() < (shot.start_timestamp_s + shot.end_s + 1)){
+      //Serial.println("force reedSwitch Off");
       newButtonState = 0;
     }
   }
+
+  // SHOT INITIATION EVENTS --------------------------------
   
-  //button just pressed
+  //button just pressed (and released)
   if(newButtonState && buttonPressed == false ){
     Serial.println("ButtonPressed");
     buttonPressed = true;
-    if(!momentary){
+    if(!momentary || reedSwitch){
       shot.brewing = true;
       setBrewingState(shot.brewing);
     }
   }
     
   // button held. Take over for the rest of the shot.
-  else if(!momentary 
+  else if(!TIMER_ONLY
+  && !momentary 
   && shot.brewing 
   && !buttonLatched 
   && (shot.shotTimer > minShotDurationS) 
@@ -523,10 +568,20 @@ void loop() {
     Serial.println("Button Latched");
     digitalWrite(OUT,HIGH); Serial.println("wrote high");
     // Get the scale to beep to inform user.
-    if(autoTare){
+    if (beep) {
+      // 3 rapid beeps
+      scale.beep(beepLevel);
+      delay(100);
+      scale.beep(beepLevel);
+      delay(100);
+      scale.beep(beepLevel);
+    }
+    else if(autoTare){
       scale.tare();
     }
   }
+
+  // SHOT COMPLETION EVENTS --------------------------------
 
   //button released
   else if(!buttonLatched 
@@ -543,7 +598,7 @@ void loop() {
   }
 
   //Max duration reached
-  else if(shot.brewing && shot.shotTimer > maxShotDurationS ){
+  else if(!TIMER_ONLY && shot.brewing && shot.shotTimer > maxShotDurationS ){
     shot.brewing = false;
     Serial.println("Max brew duration reached");
     shot.end = ENDTYPE::TIME;
@@ -556,7 +611,8 @@ void loop() {
   }
 
   //End shot
-  if(shot.brewing 
+  if(!TIMER_ONLY 
+  && shot.brewing 
   && shot.shotTimer >= shot.expected_end_s
   && shot.shotTimer >  minShotDurationS
   ){
@@ -566,8 +622,11 @@ void loop() {
     setBrewingState(shot.brewing); 
   }
 
+  // SHOT ANALYSIS  --------------------------------
+
   //Detect error of shot
-  if(shot.start_timestamp_s
+  if(!TIMER_ONLY
+  && shot.start_timestamp_s
   && shot.end_s
   && currentWeight >= (goalWeight - weightOffset)
   && seconds_f() > shot.start_timestamp_s + shot.end_s + dripDelayS){
@@ -591,6 +650,14 @@ void loop() {
       EEPROM.commit();
     }
     Serial.println();
+
+    // Inform user final weight detection is done and scale can be operated safely
+    if (beep) {
+      // Two long beeps
+      scale.beep(beepLevel);
+      delay(250);
+      scale.beep(beepLevel);
+    }
   }
 }
 
@@ -600,38 +667,48 @@ void setBrewingState(bool brewing){
     shot.start_timestamp_s = seconds_f();
     shot.shotTimer = 0;
     shot.datapoints = 0;
-    scale.resetTimer();
-    scale.startTimer();
-    if(autoTare){
-      scale.tare();
+
+    if (tareStartTimer) {
+      scale.tareStartTimer();
+    } else {
+      scale.resetTimer();
+      scale.startTimer();
+      if(autoTare){
+        scale.tare();
+      }
     }
+    
     Serial.println("Weight Timer End");
   }else{
     Serial.print("ShotEnded by ");
     switch (shot.end) {
       case ENDTYPE::TIME:
-      Serial.println("time");
-      break;
-    case ENDTYPE::WEIGHT:
-    Serial.println("weight");
-      break;
-    case ENDTYPE::BUTTON:
-    Serial.println("button");
-      break;
-    case ENDTYPE::UNDEF:
-      Serial.println("undef");
-      break;
+        Serial.println("time");
+        break;
+      case ENDTYPE::WEIGHT:
+        Serial.println("weight");
+        break;
+      case ENDTYPE::BUTTON:
+        Serial.println("button");
+        break;
+      case ENDTYPE::DISCONNECT:
+        Serial.println("disconnect");
+        break;
+      case ENDTYPE::UNDEF:
+        Serial.println("undef");
+        break;
     }
 
     shot.end_s = seconds_f() - shot.start_timestamp_s;
     scale.stopTimer();
-    if(momentary &&
+    if(!TIMER_ONLY && momentary &&
       (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end)){
       //Pulse button to stop brewing
       digitalWrite(OUT,HIGH);Serial.println("wrote high");
       delay(300);
       digitalWrite(OUT,LOW);Serial.println("wrote low");
-    }else if(!momentary){
+      buttonPressed = false;
+    }else if(!TIMER_ONLY && !momentary){
       buttonLatched = false;
       buttonPressed = false;
       Serial.println("Button Unlatched and not pressed");
@@ -665,7 +742,8 @@ void calculateEndTime(Shot* s){
     b = meanY-m*meanX;
 
     //Calculate time at which goal weight will be reached (x = (y-b)/m)
-    s->expected_end_s = (goalWeight - weightOffset - b)/m; 
+    // if M is negative (which can happen during a blooming shot when the flow stops) assume max duration (issue #29)
+    s->expected_end_s = (m < 0) ? maxShotDurationS : (goalWeight - weightOffset - b)/m;
   }
 }
 

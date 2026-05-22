@@ -12,6 +12,7 @@
 #ifndef AcaiaArduinoBLE_h
 #define AcaiaArduinoBLE_h
 
+#define LIBRARY_VERSION        "3.3.0"
 #define WRITE_CHAR_OLD_VERSION "2a80"
 #define READ_CHAR_OLD_VERSION  "2a80"
 #define WRITE_CHAR_NEW_VERSION "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -38,6 +39,8 @@ class AcaiaArduinoBLE{
         bool startTimer();
         bool stopTimer();
         bool resetTimer();
+        bool tareStartTimer();
+        bool beep(int level);
         bool heartbeat();
         float getWeight();
         bool heartbeatRequired();
