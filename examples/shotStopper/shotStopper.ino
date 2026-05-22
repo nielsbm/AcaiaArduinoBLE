@@ -24,9 +24,6 @@
 #include "AcaiaArduinoBLE.h"
 #include <EEPROM.h>
 #include "OTASetup.h"
-#include "esp_task_wdt.h"
-
-#define WDT_TIMEOUT_S 30
 
 #define FIRMWARE_VERSION 2
 #define MAX_OFFSET 5                // In case an error in brewing occured
@@ -106,9 +103,9 @@ bool enabled = true;                // The shotStopper status, if disabled it wo
 String wifiSsid = "";
 String wifiPass = "";
 
-bool tareStartTimer = false;        // Scale is able to tare and reset + start timer in one command (Bookoo support only)
-bool beep = false;                  // Scale is able to beep without relying on a tare command (Bookoo support only)
-uint8_t beepLevel = 0;              // Scale beep level between 0 (silent) and 5 (loudest) (Bookoo support only)
+bool tareStartTimer = true;        // Scale is able to tare and reset + start timer in one command (Bookoo support only)
+bool beep = true;                  // Scale is able to beep without relying on a tare command (Bookoo support only)
+uint8_t beepLevel = 1;              // Scale beep level between 0 (silent) and 5 (loudest) (Bookoo support only)
 
 typedef enum {BUTTON, WEIGHT, TIME, DISCONNECT, UNDEF} ENDTYPE;
 
@@ -436,24 +433,11 @@ void setup() {
 
   // initialize the BLE hardware
   initializeBLE();
-
-  // Arduino-ESP32 core 3.x (ESP-IDF 5.x) initializes the TWDT at boot, so
-  // esp_task_wdt_init() returns ESP_ERR_INVALID_STATE here — reconfigure instead.
-  esp_task_wdt_config_t wdtConfig = {
-    .timeout_ms     = WDT_TIMEOUT_S * 1000,
-    .idle_core_mask = 0,
-    .trigger_panic  = true,
-  };
-  if (esp_task_wdt_init(&wdtConfig) == ESP_ERR_INVALID_STATE) {
-    esp_task_wdt_reconfigure(&wdtConfig);
-  }
-  esp_task_wdt_add(NULL);
 }
 
 
 
 void loop() {
-  esp_task_wdt_reset();
   // Check for setpoint updates
   pollAndReadBLE();
   updateBLEShotStatus(shot.brewing);
