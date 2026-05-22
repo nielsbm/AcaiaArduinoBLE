@@ -135,14 +135,14 @@ unsigned long lastButtonRead_ms = 0;
 int newButtonState = 0;
 
 struct Shot {
-  float start_timestamp_s; // Relative to runtime
-  float shotTimer;         // Reset when the final drip measurement is made
-  float end_s;             // Number of seconds after the shot started
-  float expected_end_s;    // Estimated duration of the shot
-  float weight[1000];      // A scatter plot of the weight measurements, along with time_s[]
-  float time_s[1000];      // Number of seconds after the shot starte
-  int datapoints;          // Number of datapoitns in the scatter plot
-  bool brewing;            // True when actively brewing, otherwise false
+  float start_timestamp_s;
+  float shotTimer;
+  float end_s;
+  float expected_end_s;
+  float weight[N];   // ring buffer — only last N points needed for regression
+  float time_s[N];   // ring buffer
+  int datapoints;    // total count; index into ring with datapoints % N
+  bool brewing;
   ENDTYPE end;
 };
 
@@ -499,9 +499,10 @@ void loop() {
 
     // update shot trajectory
     if(shot.brewing && !TIMER_ONLY){
-      shot.time_s[shot.datapoints] = seconds_f()-shot.start_timestamp_s;
-      shot.weight[shot.datapoints] = currentWeight;
-      shot.shotTimer = shot.time_s[shot.datapoints];
+      int idx = shot.datapoints % N;
+      shot.time_s[idx] = seconds_f()-shot.start_timestamp_s;
+      shot.weight[idx] = currentWeight;
+      shot.shotTimer = shot.time_s[idx];
       shot.datapoints++;
 
       Serial.print(" ");
@@ -722,18 +723,19 @@ void setBrewingState(bool brewing){
 void calculateEndTime(Shot* s){
   
   // Do not  predict end time if there aren't enough espresso measurements yet
-  if( (s->datapoints < N) || (s->weight[s->datapoints-1] < 10) ){
+  if( (s->datapoints < N) || (s->weight[(s->datapoints-1) % N] < 10) ){
     s->expected_end_s = maxShotDurationS;
   }
   else{
-    //Get line of best fit (y=mx+b) from the last 10 measurements 
+    //Get line of best fit (y=mx+b) from the last N measurements
     float sumXY = 0, sumX = 0, sumY = 0, sumSquaredX = 0, m = 0, b = 0, meanX = 0, meanY = 0;
 
-    for(int i = s->datapoints - N; i < s->datapoints; i++){
-      sumXY+=s->time_s[i]*s->weight[i];
-      sumX+=s->time_s[i];
-      sumY+=s->weight[i];
-      sumSquaredX += ( s->time_s[i] * s->time_s[i] );
+    for(int i = 0; i < N; i++){
+      int idx = (s->datapoints - N + i) % N;
+      sumXY += s->time_s[idx] * s->weight[idx];
+      sumX  += s->time_s[idx];
+      sumY  += s->weight[idx];
+      sumSquaredX += s->time_s[idx] * s->time_s[idx];
     }
 
     m = (N*sumXY-sumX*sumY) / (N*sumSquaredX-(sumX*sumX));
