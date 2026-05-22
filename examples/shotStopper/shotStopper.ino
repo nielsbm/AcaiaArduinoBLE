@@ -24,6 +24,9 @@
 #include "AcaiaArduinoBLE.h"
 #include <EEPROM.h>
 #include "OTASetup.h"
+#include "esp_task_wdt.h"
+
+#define WDT_TIMEOUT_S 30
 
 #define FIRMWARE_VERSION 2
 #define MAX_OFFSET 5                // In case an error in brewing occured
@@ -433,11 +436,15 @@ void setup() {
 
   // initialize the BLE hardware
   initializeBLE();
+
+  esp_task_wdt_init(WDT_TIMEOUT_S, true);
+  esp_task_wdt_add(NULL);
 }
 
 
 
 void loop() {
+  esp_task_wdt_reset();
   // Check for setpoint updates
   pollAndReadBLE();
   updateBLEShotStatus(shot.brewing);
