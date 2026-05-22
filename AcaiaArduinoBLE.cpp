@@ -263,6 +263,8 @@ bool AcaiaArduinoBLE::heartbeatRequired(){
 bool AcaiaArduinoBLE::isConnected(){
     return _connected;
 }
+static const float powLUT[] = {1.0f, 10.0f, 100.0f, 1000.0f};
+
 bool AcaiaArduinoBLE::newWeightAvailable(){
     bool newWeightPacket = false;
 
@@ -282,7 +284,7 @@ bool AcaiaArduinoBLE::newWeightAvailable(){
           (13 >= l && OLD != _type) ||      //13 byte packets for pyxis and older lunar 2021 fw
           (14 == l && OLD == _type) ||      //14 byte packets for lunar 2021 AL008
           (17 == l && NEW == _type) ||      //17 byte packets for newer lunar 2021 fw
-          (20 == l && GENERIC == _type)     //18 byte packets for generic scales
+          (20 == l && GENERIC == _type)     //20 byte packets for generic scales
         ){
             _read.readValue(input, (l > 13) ? 13 : l); // readValue() seems to crash whenever l > weight packet (10, 13 or 18)
 
@@ -301,8 +303,8 @@ bool AcaiaArduinoBLE::newWeightAvailable(){
             //Grab weight bytes (5 and 6) 
             // apply scaling based on the unit byte (9)
             // get sign byte (10)
-            _currentWeight = (((input[6] & 0xff) << 8) + (input[5] & 0xff)) 
-                            / pow(10,input[9])
+            _currentWeight = (((input[6] & 0xff) << 8) + (input[5] & 0xff))
+                            / powLUT[min((int)input[9], 3)]
                             * ((input[10] & 0x02) ? -1 : 1);
             newWeightPacket = true;
 
@@ -311,8 +313,8 @@ bool AcaiaArduinoBLE::newWeightAvailable(){
             //Grab weight bytes (2 and 3),
             // apply scaling based on the unit byte (6)
             // get sign byte (7)
-            _currentWeight = (((input[3] & 0xff) << 8) + (input[2] & 0xff)) 
-                            / pow(10, input[6]) 
+            _currentWeight = (((input[3] & 0xff) << 8) + (input[2] & 0xff))
+                            / powLUT[min((int)input[6], 3)]
                             * ((input[7] & 0x02) ? -1 : 1);
             newWeightPacket = true;
 
