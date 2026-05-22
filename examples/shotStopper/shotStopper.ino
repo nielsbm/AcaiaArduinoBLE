@@ -457,10 +457,6 @@ void loop() {
     return;
   }
 
-  if (checkOTAMode(otaModeRequested, wifiSsid, wifiPass)) {
-    return;
-  }
-
   // Connect to scale
   if (!scale.isConnected()) {
     updateScaleStatus(STATUS_DISCONNECTED);
@@ -646,8 +642,9 @@ void loop() {
     }else{
       Serial.print("g. Next time I'll create an offset of ");
       weightOffset += currentWeight - goalWeight;
+      if(weightOffset < 0) weightOffset = 0;
       Serial.print(weightOffset);
-      EEPROM.write(OFFSET_ADDR, weightOffset*10); //1 byte, 0-255
+      EEPROM.write(OFFSET_ADDR, (uint8_t)(weightOffset * 10)); //1 byte, 0-255
       EEPROM.commit();
     }
     Serial.println();
